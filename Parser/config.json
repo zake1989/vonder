@@ -1,0 +1,24 @@
+{
+    "bool_names": [
+        "isActive", "isEnabled", "isVisible", "shouldUpdate", "needsRefresh",
+        "extraFlag", "isHidden", "useCache", "autoRetry", "logEnabled",
+        "trackUsage", "showDebug", "notifyUser", "allowEdit", "acceptInput",
+        "forceSync", "lazyLoad", "keepAlive", "hasFocus", "isDirty",
+        "hasError", "showAlert", "syncNow", "allowBackup", "retryOnFail",
+        "useLegacy", "enableTLS", "useSandbox", "keepSession", "logVerbose",
+        "prefetchData", "safeMode", "traceEnabled", "allowAds", "showHints",
+        "enableVR", "darkMode", "compactView", "useGPU", "strictMode",
+        "betaFeature", "quickRender", "lowLatency", "trackPosition", "autoSave",
+        "snapToGrid", "useProxy", "allowGuest", "randomize", "checkCRC",
+        "keepOrder", "mergeChunks", "usePhysics", "lightMode", "drawDebug",
+        "flushCache", "cleanExit", "minifyOutput", "doubleBuffer", "limitFPS",
+        "notifyAdmin", "scaleUI", "autoStart", "multiThread", "allowScroll",
+        "checkUpdates", "useThreads", "safeLoad", "keepAspect", "traceStack",
+        "confirmExit", "promptUser", "ignoreErrors", "autoHide", "strictType",
+        "filterNoise", "muteAudio", "validateInput", "resetForm", "sortData",
+        "trimWhitespace", "lockScreen", "compactMode", "retrySync", "pushState",
+        "matchLocale", "verifySig", "logSummary", "deepScan", "alignCenter",
+        "useWebGL", "skipFrames", "avoidReflow", "trackFPS", "allowDrag",
+        "queueJobs", "preloadAssets", "monitorHeap", "lazyRender", "checkState"
+    ]
+}
