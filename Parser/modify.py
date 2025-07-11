@@ -349,31 +349,44 @@ def insert_if_to_functions(tree, source_code_bytes, class_bool_map, function_boo
 # 主流程
 # =====================
 
-if len(sys.argv) != 2:
-    print(f"Usage: python {sys.argv[0]} <Swift file>")
-    sys.exit(1)
+def process_swift_file(source_path):
+    source_code = open(source_path, 'rb').read()
 
-source_path = sys.argv[1]
-source_code = open(source_path, 'rb').read()
+    SWIFT_LANGUAGE = Language(tsp_swift.language())
+    parser = Parser(language=SWIFT_LANGUAGE)
 
-SWIFT_LANGUAGE = Language(tsp_swift.language())
-parser = Parser(language=SWIFT_LANGUAGE)
+    # 第一步: 插入 class 成员
+    tree = parser.parse(source_code)
+    new_source_code, class_bool_map = insert_bool_properties_to_class(tree, source_code)
 
-# 第一步: 插入 class 成员
-tree = parser.parse(source_code)
-new_source_code, class_bool_map = insert_bool_properties_to_class(tree, source_code)
+    # 第二步: 插入 function 参数
+    tree = parser.parse(new_source_code)
+    new_source_code, function_bool_map = insert_parameter_to_functions(tree, new_source_code)
 
-# 第二步: 插入 function 参数
-tree = parser.parse(new_source_code)
-new_source_code, function_bool_map = insert_parameter_to_functions(tree, new_source_code)
+    # 第三步: 插入函数体 if
+    tree = parser.parse(new_source_code)
+    new_source_code = insert_if_to_functions(tree, new_source_code, class_bool_map, function_bool_map)
 
-# 第三步: 插入函数体 if
-tree = parser.parse(new_source_code)
-new_source_code = insert_if_to_functions(tree, new_source_code, class_bool_map, function_bool_map)
+    # print("\n===== 最终修改后的文件内容 =====")
+    # print(new_source_code.decode('utf-8'))
 
-# print("\n===== 最终修改后的文件内容 =====")
-# print(new_source_code.decode('utf-8'))
+    with open(source_path, "wb") as f:
+        f.write(new_source_code)
 
-with open(source_path, "wb") as f:
-    f.write(new_source_code)
-print(f"✅ 文件已覆盖保存到 {source_path}")
+    print(f"✅ 文件已覆盖保存到 {source_path}")
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print(f"Usage: python {sys.argv[0]} <Swift file>")
+        sys.exit(1)
+
+    source_path = sys.argv[1]
+    process_swift_file(source_path)
+
+
+
+
+
+
+
+
