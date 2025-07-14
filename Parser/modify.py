@@ -35,7 +35,16 @@ def find_class_nodes(node, results=None):
     if results is None:
         results = []
     if node.type == "class_declaration":
-        results.append(node)
+        is_class = False
+        type_name = "Unknown"
+        for child in node.children:
+            if child.type == "class":
+                is_class = True
+            # "extension"
+        if is_class:
+            results.append(node)
+        else:
+            print(f"⚠️ 跳过 class extension")
     for child in node.children:
         find_class_nodes(child, results)
     return results
@@ -426,9 +435,9 @@ def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, 
         tree = parser.parse(source_bytes)
         func_nodes = recursive_find_functions(tree.root_node)
 
-        print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
-        print(f"✅ 已改写函数签名: {list(modified_signatures)}")
-        print(f"🕐 待改写函数签名: {[sig for sig in signature_map.keys() if sig not in modified_signatures]}")
+        # print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
+        # print(f"✅ 已改写函数签名: {list(modified_signatures)}")
+        # print(f"🕐 待改写函数签名: {[sig for sig in signature_map.keys() if sig not in modified_signatures]}")
 
         modified_this_round = 0
 
@@ -454,25 +463,14 @@ def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, 
 # =====================
 
 def analyze_function_returns(func_node, source_code_bytes):
-    has_arrow = False
-    can_be_nil = False
-
     for idx, child in enumerate(func_node.children):
         if child.type == '->':
-            has_arrow = True
-            if idx + 1 < len(func_node.children):
-                return_node = func_node.children[idx + 1]
-                # 判断是否 optional
-                if is_optional_node(return_node):
-                    can_be_nil = True
-            break
-
-    if not has_arrow:
-        return "no_return"
-    elif can_be_nil:
-        return "can_be_nil"
-    else:
-        return "must_return"
+            # 有返回值
+            next_node = func_node.children[idx + 1] if idx + 1 < len(func_node.children) else None
+            if next_node and next_node.type == "optional_type":
+                return "can_be_nil"
+            return "must_return"
+    return "no_return"
 
 def is_optional_node(node):
     if node.type == "optional_type":
@@ -600,9 +598,9 @@ def insert_if_to_copied_functions(tree, source_bytes, function_map, parser, clas
         tree = parser.parse(source_bytes)
         func_nodes = recursive_find_functions(tree.root_node)
 
-        print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
-        print(f"✅ 已插入 if 的函数签名: {list(modified_signatures)}")
-        print(f"🕐 待插入 if 的函数签名: {[sig for sig in signature_map.keys() if sig not in modified_signatures]}")
+        # print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
+        # print(f"✅ 已插入 if 的函数签名: {list(modified_signatures)}")
+        # print(f"🕐 待插入 if 的函数签名: {[sig for sig in signature_map.keys() if sig not in modified_signatures]}")
 
         modified_this_round = 0
 
@@ -658,7 +656,7 @@ def process_swift_file(source_path):
     print("\n===== 最终修改后的文件内容 =====\n")
     print(new_source.decode('utf-8'))
 
-    # 想保存就解开：
+    # # 7. 想保存就解开：
     # with open(source_path, "wb") as f:
     #     f.write(new_source)
     # print(f"✅ 文件已保存：{source_path}")

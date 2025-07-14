@@ -206,7 +206,7 @@ def analyze_function_returns(func_node, source_code_bytes):
         return "must_return"
 
 def is_optional_node(node):
-    if node.type == "optional_type" or node.type == "?":
+    if node.type == "optional_type":
         return True
     for child in node.children:
         if is_optional_node(child):

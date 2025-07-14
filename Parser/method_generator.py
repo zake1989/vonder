@@ -381,7 +381,7 @@ templates_void = [
   {
     "signature": "func {name}()",
     "body": [
-      "defer { print(\"Deferred\") }"
+      "defer { print(\"Deferred\") }",
       "let _ = Date().timeIntervalSince1970"
     ]
   },
