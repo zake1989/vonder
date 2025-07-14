@@ -61,7 +61,18 @@ def recursive_find_functions(node, results=None):
     if results is None:
         results = []
     if node.type == "function_declaration":
-        results.append(node)
+        # 检查是不是在另一个函数的 function_body 里
+        parent = node.parent
+        inside_function = False
+        while parent is not None:
+            if parent.type in ("function_body", "statements"):
+                inside_function = True
+                break
+            parent = parent.parent
+        if not inside_function:
+            results.append(node)
+        else:
+            print(f"⚠️ 跳过局部函数")
     for child in node.children:
         recursive_find_functions(child, results)
     return results
@@ -78,68 +89,46 @@ def recursive_find_classes(node, results=None):
 def get_node_text(source_bytes, node):
     return source_bytes[node.start_byte:node.end_byte].decode('utf-8')
 
-def extract_function_info(func_node, source_bytes):
-    info = {
-        "name": None,
-        "params": None,
-        "return_type": None,
-        "header": None,
-        "body": None,
-        "full_code": None,
-        "start_byte": func_node.start_byte,
-        "end_byte": func_node.end_byte,
-        "func_node": func_node
-    }
-
-    for child in func_node.children:
-        if child.type == "simple_identifier":
-            info["name"] = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
-
-        if child.type == "function_signature":
-            for sig_child in child.children:
-                if sig_child.type == "parameter_clause":
-                    info["params"] = source_bytes[sig_child.start_byte:sig_child.end_byte].decode("utf-8")
-                elif sig_child.type == "function_result":
-                    info["return_type"] = source_bytes[sig_child.start_byte:sig_child.end_byte].decode("utf-8")
-
-        if child.type == "function_body":
-            info["body"] = source_bytes[child.start_byte:child.end_byte].decode("utf-8")
-
-    # fallback
-    if info["params"] is None:
-        info["params"] = "()"
-        print(f"⚠️ 参数未能提取，默认设为 '()' - 函数名: {info['name']}")
-
-    # 提取 header（从 start 到 { 之前）
-    func_code = source_bytes[func_node.start_byte:func_node.end_byte].decode("utf-8")
-    brace_pos = func_code.find("{")
-    info["header"] = func_code[:brace_pos].strip() if brace_pos > -1 else func_code.strip()
-
-    info["full_code"] = func_code
-    return info
-
 def insert_text_at(source_bytes, insert_pos, insert_text):
     return source_bytes[:insert_pos] + insert_text.encode('utf-8') + source_bytes[insert_pos:]
 
 def extract_argument_pairs_from_tree(func_node, source_bytes):
     arg_pairs = []
-    nodes_to_visit = [func_node]
-    while nodes_to_visit:
-        node = nodes_to_visit.pop(0)  # 改成 pop(0) 保证顺序遍历
-        if node.type == "parameter":
-            simple_ids = [c for c in node.children if c.type == "simple_identifier"]
-            if len(simple_ids) == 2:
-                external = get_node_text(source_bytes, simple_ids[0])
-                internal = get_node_text(source_bytes, simple_ids[1])
-                if external == "_":
-                    arg_pairs.append(f"{internal}")
-                else:
-                    arg_pairs.append(f"{external}: {internal}")
-            elif len(simple_ids) == 1:
-                name = get_node_text(source_bytes, simple_ids[0])
-                arg_pairs.append(f"{name}: {name}")
+    seen_params = set()
+
+    for param in (child for child in func_node.children if child.type == "parameter"):
+        # 检查 inout
+        is_inout = any(
+            sub_sub.type == "inout"
+            for child in param.children if child.type == "parameter_modifiers"
+            for mod in child.children
+            for sub_sub in mod.children
+        )
+
+        simple_id_nodes = [c for c in param.children if c.type == "simple_identifier"]
+        if not simple_id_nodes:
+            continue
+
+        # 根据数量和外部名判断
+        if len(simple_id_nodes) == 2:
+            external = get_node_text(source_bytes, simple_id_nodes[0])
+            internal = get_node_text(source_bytes, simple_id_nodes[1])
+            call_value = f"&{internal}" if is_inout else internal
+            if external == "_":
+                call = f"{call_value}"
+            else:
+                call = f"{external}: {call_value}"
+        elif len(simple_id_nodes) == 1:
+            name = get_node_text(source_bytes, simple_id_nodes[0])
+            call_value = f"&{name}" if is_inout else name
+            call = f"{name}: {call_value}"
         else:
-            nodes_to_visit.extend(node.children)
+            continue
+
+        if call not in seen_params:
+            seen_params.add(call)
+            arg_pairs.append(call)
+    
     return arg_pairs
 
 def find_and_rebuild_parameters(node, source_code_bytes):
@@ -240,7 +229,7 @@ def get_signature_string(func_node, source_bytes):
 
 def extract_function_info(func_node, source_bytes):
     """
-    提取函数的关键信息，包括唯一 signature。
+    提取函数信息，包括名称、签名、头、体、全代码，并记录所属 class/struct/extension。
     """
     info = {
         "name": None,
@@ -251,7 +240,8 @@ def extract_function_info(func_node, source_bytes):
         "full_code": None,
         "start_byte": func_node.start_byte,
         "end_byte": func_node.end_byte,
-        "func_node": func_node
+        "func_node": func_node,
+        "class_name": "Unknown"
     }
 
     for child in func_node.children:
@@ -269,6 +259,20 @@ def extract_function_info(func_node, source_bytes):
     info["header"] = func_code[:brace_pos].strip() if brace_pos > -1 else func_code.strip()
 
     info["full_code"] = func_code
+
+    # ✅ 向上寻找所属 class / struct / extension
+    parent = func_node.parent
+    # print(f"㊗️ ready to find class for function")
+    while parent is not None:
+        if parent.type in ("class_declaration", "struct_declaration", "extension_declaration"):
+            # 遍历找 type_identifier
+            for c in parent.children:
+                if c.type == "type_identifier":
+                    info["class_name"] = get_node_text(source_bytes, c)
+                    break
+            break
+        parent = parent.parent
+
     return info
 
 def find_function_node_by_signature(source_bytes, parser, signature):
@@ -426,7 +430,8 @@ def rewrite_single_function_body(source_bytes, func_node, record):
     return bytes(new_bytes)
 
 def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, parser):
-    signature_map = {r["original_signature"]: r for r in function_map}
+    # 用 (class_name, signature) 作为唯一 key
+    signature_map = {(r["class_name"], r["original_signature"]): r for r in function_map}
     modified_signatures = set()
 
     round_count = 0
@@ -435,20 +440,25 @@ def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, 
         tree = parser.parse(source_bytes)
         func_nodes = recursive_find_functions(tree.root_node)
 
-        # print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
-        # print(f"✅ 已改写函数签名: {list(modified_signatures)}")
-        # print(f"🕐 待改写函数签名: {[sig for sig in signature_map.keys() if sig not in modified_signatures]}")
+        print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
+        print(f"✅ 已改写函数: {list(modified_signatures)}")
+        print(f"🕐 待改写函数: {[key for key in signature_map.keys() if key not in modified_signatures]}")
 
         modified_this_round = 0
 
         for func_node in func_nodes:
             info = extract_function_info(func_node, source_bytes)
             signature = info.get("signature")
-            if signature in signature_map and signature not in modified_signatures:
-                print(f"\n🔍 尝试改写函数: {signature}")
-                record = signature_map[signature]
+            class_name = info.get("class_name", "Unknown")
+            signature_key = (class_name, signature)
+
+            print(f"\n🔍 准备尝试改写函数: {signature} in class {class_name}")
+
+            if signature_key in signature_map and signature_key not in modified_signatures:
+                print(f"\n🔍 尝试改写函数: {signature} in class {class_name}")
+                record = signature_map[signature_key]
                 source_bytes = rewrite_single_function_body(source_bytes, func_node, record)
-                modified_signatures.add(signature)
+                modified_signatures.add(signature_key)
                 modified_this_round += 1
 
         if modified_this_round == 0:
