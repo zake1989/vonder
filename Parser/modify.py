@@ -214,22 +214,17 @@ def get_signature_string(func_node, source_bytes):
     prefix = source_bytes[func_node.start_byte:start_paren.start_byte].decode('utf-8')
 
     return prefix + old_params
-    # """
-    # 从 function_declaration node 中提取签名字符串。
-    # 包含 modifiers, func, name, 参数，不含 function_body。
-    # """
-    # parts = []
-    # for child in func_node.children:
-    #     if child.type in ["modifiers", "func", "simple_identifier", "(", "parameter", ")", ","]:
-    #         parts.append(get_node_text(source_bytes, child))
-    #     if child.type == "function_body":
-    #         break  # 不取到函数体
-    # return "".join(parts).replace(" ", "")
-
 
 def extract_function_info(func_node, source_bytes):
     """
-    提取函数信息，包括名称、签名、头、体、全代码，并记录所属 class/struct/extension。
+    提取函数信息，包括：
+    - name: 函数名称
+    - signature: 方法签名（包含参数）
+    - header: 到 { 的部分（用于显示）
+    - body: 函数体 {...}
+    - full_code: 整个函数代码
+    - start_byte, end_byte: 位置
+    - class_name: 所属的 class / struct / extension 名称
     """
     info = {
         "name": None,
@@ -244,13 +239,14 @@ def extract_function_info(func_node, source_bytes):
         "class_name": "Unknown"
     }
 
+    # 提取函数名、body
     for child in func_node.children:
         if child.type == "simple_identifier":
             info["name"] = get_node_text(source_bytes, child)
         if child.type == "function_body":
             info["body"] = get_node_text(source_bytes, child)
 
-    # 生成 signature
+    # 提取 signature
     info["signature"] = get_signature_string(func_node, source_bytes)
 
     # 提取 header（到 {）
@@ -260,19 +256,30 @@ def extract_function_info(func_node, source_bytes):
 
     info["full_code"] = func_code
 
-    # ✅ 向上寻找所属 class / struct / extension
+    # ✅ 向上寻找所属 class / struct / extension，并支持 extension 的 user_type
     parent = func_node.parent
-    # print(f"㊗️ ready to find class for function")
     while parent is not None:
         if parent.type in ("class_declaration", "struct_declaration", "extension_declaration"):
-            # 遍历找 type_identifier
+            type_name_found = False
             for c in parent.children:
                 if c.type == "type_identifier":
                     info["class_name"] = get_node_text(source_bytes, c)
+                    type_name_found = True
                     break
-            break
+                elif c.type == "user_type":
+                    # 在 extension 中通常是 user_type -> type_identifier
+                    for g in c.children:
+                        if g.type == "type_identifier":
+                            info["class_name"] = get_node_text(source_bytes, g)
+                            type_name_found = True
+                            break
+                if type_name_found:
+                    break
+            if type_name_found:
+                break
         parent = parent.parent
 
+    print(f"🔍 函数 {info['name']} 属于类型 {info['class_name']}")
     return info
 
 def find_function_node_by_signature(source_bytes, parser, signature):
@@ -336,16 +343,28 @@ def generate_copied_functions(tree, source_code_bytes):
 
         new_func_code = indent + copied_signature + body
 
-        # ➡️ 查找父类名
+        # ➡️ 查找父类名 (支持 class / struct / extension)
         parent = func
-        while parent.parent and parent.type != "class_declaration":
-            parent = parent.parent
         class_name = "Unknown"
-        if parent.type == "class_declaration":
-            for c in parent.children:
-                if c.type == "type_identifier":
-                    class_name = get_node_text(source_code_bytes, c)
+        while parent is not None:
+            if parent.type in ("class_declaration", "struct_declaration", "extension_declaration"):
+                type_name_found = False
+                for c in parent.children:
+                    if c.type == "type_identifier":
+                        class_name = get_node_text(source_code_bytes, c)
+                        type_name_found = True
+                        break
+                    elif c.type == "user_type":
+                        for g in c.children:
+                            if g.type == "type_identifier":
+                                class_name = get_node_text(source_code_bytes, g)
+                                type_name_found = True
+                                break
+                    if type_name_found:
+                        break
+                if type_name_found:
                     break
+            parent = parent.parent
 
         # 保存信息
         function_map.append({
@@ -440,9 +459,9 @@ def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, 
         tree = parser.parse(source_bytes)
         func_nodes = recursive_find_functions(tree.root_node)
 
-        print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
-        print(f"✅ 已改写函数: {list(modified_signatures)}")
-        print(f"🕐 待改写函数: {[key for key in signature_map.keys() if key not in modified_signatures]}")
+        # print(f"\n===== 🔄 Round {round_count}：共解析到 {len(func_nodes)} 个函数 =====")
+        # print(f"✅ 已改写函数: {list(modified_signatures)}")
+        # print(f"🕐 待改写函数: {[key for key in signature_map.keys() if key not in modified_signatures]}")
 
         modified_this_round = 0
 
@@ -488,6 +507,27 @@ def is_optional_node(node):
     for child in node.children:
         if is_optional_node(child):
             return True
+    return False
+
+def is_static_or_class_method(func_node):
+    """
+    检查 function_declaration 是否包含 static 或 class (包括 private static, private class 等多重修饰)
+    """
+    for child in func_node.children:
+        if child.type == "modifiers":
+            for mod_child in child.children:
+                if mod_child.type == "property_modifier":
+                    # 再向下看具体 static / class
+                    for sub_child in mod_child.children:
+                        if sub_child.type in ("static", "class"):
+                            return True
+                elif mod_child.type in ("static", "class"):
+                    return True
+        elif child.type in ("static", "class"):
+            return True
+        if child.type == "simple_identifier":
+            # 已过参数声明，提前停止
+            break
     return False
 
 def insert_if_into_single_function_body(source_bytes, func_node, record, class_bool_map):
@@ -537,15 +577,19 @@ def insert_if_into_single_function_body(source_bytes, func_node, record, class_b
 
     print(f"Fake call string: {fake_call}")
 
-    # 决定插入条件
-    member_bools = class_bool_map.get(class_name, [])
-    if class_name != "Unknown" and member_bools:
-        member_var = random.choice(member_bools)
-        condition = f"self.{member_var} && {param_bool}"
-        message = f"Both flags are true (self.{member_var} & {param_bool})"  
-    else:
+    if is_static_or_class_method(func_node):
+        # 类方法，不用 self 访问成员变量
         condition = f"{param_bool}"
         message = f"{param_bool} is true"
+    else:
+        member_bools = class_bool_map.get(class_name, [])
+        if class_name != "Unknown" and member_bools:
+            member_var = random.choice(member_bools)
+            condition = f"self.{member_var} && {param_bool}"
+            message = f"Both flags are true (self.{member_var} & {param_bool})"  
+        else:
+            condition = f"{param_bool}"
+            message = f"{param_bool} is true"
 
     # 根据返回情况生成插入代码
     if return_type == "no_return":
@@ -662,14 +706,14 @@ def process_swift_file(source_path):
     tree = parser.parse(new_source)
     new_source = insert_if_to_copied_functions(tree, new_source, function_map, parser, class_bool_map)
 
-    # 6. 打印结果
-    print("\n===== 最终修改后的文件内容 =====\n")
-    print(new_source.decode('utf-8'))
+    # # 6. 打印结果
+    # print("\n===== 最终修改后的文件内容 =====\n")
+    # print(new_source.decode('utf-8'))
 
-    # # 7. 想保存就解开：
-    # with open(source_path, "wb") as f:
-    #     f.write(new_source)
-    # print(f"✅ 文件已保存：{source_path}")
+    # 7. 想保存就解开：
+    with open(source_path, "wb") as f:
+        f.write(new_source)
+    print(f"✅ 文件已保存：{source_path}")
 
 # =====================
 # 脚本入口
