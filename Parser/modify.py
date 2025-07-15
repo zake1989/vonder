@@ -171,20 +171,28 @@ def insert_bool_properties_to_class(tree, source_code_bytes):
     classes.sort(key=lambda n: n.start_byte, reverse=True)
     output_parts, last_index = [], len(source_code_bytes)
 
+    def get_full_class_name(node):
+        names = []
+        current = node
+        while current:
+            if current.type in ("class_declaration", "struct_declaration", "extension_declaration"):
+                for c in current.children:
+                    if c.type == "type_identifier":
+                        names.append(get_node_text(source_code_bytes, c))
+                        break
+            current = current.parent
+        names.reverse()
+        return ".".join(names) if names else "Unknown"
+
     for cls in classes:
-        # 类名
-        class_name = "Unknown"
-        for child in cls.children:
-            if child.type == "type_identifier":
-                class_name = source_code_bytes[child.start_byte:child.end_byte].decode('utf-8')
-                break
+        class_name = get_full_class_name(cls)
 
         brace_node = find_class_body_brace_node(cls)
         if not brace_node:
             continue
 
         insert_pos = brace_node.end_byte
-        declarations = generate_bool_declarations(random.randint(1,3))
+        declarations = generate_bool_declarations(random.randint(1, 3))
         bool_var_names = [d.split()[1].rstrip(":") for d in declarations]
         class_bool_map[class_name] = bool_var_names
 
@@ -193,11 +201,11 @@ def insert_bool_properties_to_class(tree, source_code_bytes):
         output_parts.append(insert_text.encode('utf-8'))
         last_index = insert_pos
 
-        print(f"✅ 在 class {class_name} 插入 Bool {bool_var_names}")
+        # print(f"✅ 在 class {class_name} 插入 Bool {bool_var_names}")
 
     output_parts.append(source_code_bytes[:last_index])
     new_source = b"".join(reversed(output_parts))
-    return new_source, class_bool_map 
+    return new_source, class_bool_map
 
 # =====================
 # 复制函数并添加 bool 参数
@@ -207,7 +215,7 @@ def get_signature_string(func_node, source_bytes):
     # 找参数括号节点
     start_paren, end_paren = find_and_rebuild_parameters(func_node, source_bytes)
     if not start_paren or not end_paren:
-        print(f"⚠️ 未找到参数括号，跳过函数 {original_name}")
+        # print(f"⚠️ 未找到参数括号，跳过函数 {original_name}")
         return ""
 
     old_params = source_bytes[start_paren.start_byte:end_paren.end_byte].decode('utf-8')
@@ -279,7 +287,7 @@ def extract_function_info(func_node, source_bytes):
                 break
         parent = parent.parent
 
-    print(f"🔍 函数 {info['name']} 属于类型 {info['class_name']}")
+    # print(f"🔍 函数 {info['name']} 属于类型 {info['class_name']}")
     return info
 
 def find_function_node_by_signature(source_bytes, parser, signature):
@@ -314,7 +322,7 @@ def generate_copied_functions(tree, source_code_bytes):
         # 找参数括号节点
         start_paren, end_paren = find_and_rebuild_parameters(func, source_code_bytes)
         if not start_paren or not end_paren:
-            print(f"⚠️ 未找到参数括号，跳过函数 {original_name}")
+            # print(f"⚠️ 未找到参数括号，跳过函数 {original_name}")
             continue
 
         old_params = source_code_bytes[start_paren.start_byte:end_paren.end_byte].decode('utf-8')
@@ -378,7 +386,7 @@ def generate_copied_functions(tree, source_code_bytes):
             "class_name": class_name  # ✅ 新增
         })
 
-        print(f"✅ 复制函数 {original_name} -> {new_name}，添加参数 {bool_param}\n原签名:\n{original_signature}\n复制签名:\n{copied_signature}\n")
+        # print(f"✅ 复制函数 {original_name} -> {new_name}，添加参数 {bool_param}\n原签名:\n{original_signature}\n复制签名:\n{copied_signature}\n")
 
     return function_map
 
@@ -402,6 +410,33 @@ def insert_copied_functions_after_originals(source_bytes, function_map):
 # 改写原函数调用复制函数
 # =====================
 
+def has_throws_on_function(func_node, source_bytes):
+    """
+    检查 function_declaration 是否带 throws。
+    只在 simple_identifier 到 function_body 之间寻找 throws 节点。
+    包含两种情况：
+    - throws 节点
+    - user_type -> type_identifier == 'throws'
+    """
+    seen_name = False
+    for child in func_node.children:
+        if not seen_name:
+            if child.type == "simple_identifier":
+                seen_name = True
+            continue
+        if child.type == "function_body":
+            break
+        if child.type == "throws":
+            return True
+        if child.type == "user_type":
+            # 遍历 user_type 的子节点，找 type_identifier
+            for gchild in child.children:
+                if gchild.type == "type_identifier":
+                    text = get_node_text(source_bytes, gchild)
+                    if text == "throws":
+                        return True
+    return False
+
 def rewrite_single_function_body(source_bytes, func_node, record):
     """
     对单个 function_node 使用 record 重写函数体，并返回新的 bytes。
@@ -411,20 +446,23 @@ def rewrite_single_function_body(source_bytes, func_node, record):
     signature = record["original_signature"]
 
     has_return_type = any(child.type == '->' for child in func_node.children)
-    print(f"🔎 函数 {signature} 是否有返回值: {has_return_type}")
+    # print(f"🔎 函数 {signature} 是否有返回值: {has_return_type}")
+
+    has_throws = has_throws_on_function(func_node, source_bytes)
+    # print(f"🔎 函数 {signature} 是否有错误抛出: {has_throws}")
 
     arg_pairs = extract_argument_pairs_from_tree(func_node, source_bytes)
-    print(f"📌 提取到的参数对: {arg_pairs}")
+    # print(f"📌 提取到的参数对: {arg_pairs}")
     call_args = ", ".join(arg_pairs)
     if call_args:
         call_args += f", {bool_param}: false"
     else:
         call_args = f"{bool_param}: false"
-    print(f"🚀 重组调用参数为: {call_args}")
+    # print(f"🚀 重组调用参数为: {call_args}")
 
     body_node = next((c for c in func_node.children if c.type == "function_body"), None)
     if not body_node:
-        print(f"⚠️ 未找到 {signature} 的 function_body，跳过改写")
+        # print(f"⚠️ 未找到 {signature} 的 function_body，跳过改写")
         return source_bytes  # 返回原始
 
     # 获取缩进
@@ -432,20 +470,25 @@ def rewrite_single_function_body(source_bytes, func_node, record):
     line = source_bytes[line_start:body_node.start_byte].decode('utf-8')
     indent_match = re.match(r'\s*', line)
     indent = indent_match.group(0) if indent_match else ""
-    print(f"📝 检测到缩进: '{indent}'")
+    # print(f"📝 检测到缩进: '{indent}'")
 
     # 构造新的函数体
-    if has_return_type:
-        new_body = f"{indent}{{\n{indent}    return {new_name}({call_args})\n{indent}}}"
+    if has_throws:
+        call_line = f"try {new_name}({call_args})"
     else:
-        new_body = f"{indent}{{\n{indent}    {new_name}({call_args})\n{indent}}}"
-    print(f"✍️ 替换后的函数体:\n{new_body}")
+        call_line = f"{new_name}({call_args})"
+
+    if has_return_type:
+        new_body = f"{indent}{{\n{indent}    return {call_line}\n{indent}}}"
+    else:
+        new_body = f"{indent}{{\n{indent}    {call_line}\n{indent}}}"
+    # print(f"✍️ 替换后的函数体:\n{new_body}")
 
     # 替换
     new_bytes = bytearray(source_bytes)
     new_bytes[body_node.start_byte:body_node.end_byte] = new_body.encode('utf-8')
 
-    print(f"✅ 已将 {signature} 改写为调用 {new_name}（{'带 return' if has_return_type else '无 return'}）")
+    # print(f"✅ 已将 {signature} 改写为调用 {new_name}（{'带 return' if has_return_type else '无 return'}）")
     return bytes(new_bytes)
 
 def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, parser):
@@ -471,20 +514,20 @@ def rewrite_original_functions_to_call_copies(tree, source_bytes, function_map, 
             class_name = info.get("class_name", "Unknown")
             signature_key = (class_name, signature)
 
-            print(f"\n🔍 准备尝试改写函数: {signature} in class {class_name}")
+            # print(f"\n🔍 准备尝试改写函数: {signature} in class {class_name}")
 
             if signature_key in signature_map and signature_key not in modified_signatures:
-                print(f"\n🔍 尝试改写函数: {signature} in class {class_name}")
+                # print(f"\n🔍 尝试改写函数: {signature} in class {class_name}")
                 record = signature_map[signature_key]
                 source_bytes = rewrite_single_function_body(source_bytes, func_node, record)
                 modified_signatures.add(signature_key)
                 modified_this_round += 1
 
         if modified_this_round == 0:
-            print("⚠️ 本轮未找到可改写的函数，可能已经全部完成或有剩余未匹配函数。")
+            # print("⚠️ 本轮未找到可改写的函数，可能已经全部完成或有剩余未匹配函数。")
             break
 
-    print("\n🎉 所有函数改写完成。")
+    # print("\n🎉 所有函数改写完成。")
     return source_bytes
 
 # =====================
@@ -538,7 +581,7 @@ def insert_if_into_single_function_body(source_bytes, func_node, record, class_b
 
     body_node = next((c for c in func_node.children if c.type == "function_body"), None)
     if not body_node:
-        print(f"⚠️ 未在 {new_name} 找到 function_body，跳过")
+        # print(f"⚠️ 未在 {new_name} 找到 function_body，跳过")
         return source_bytes
 
     brace_node = find_function_body_brace(func_node)
@@ -550,23 +593,23 @@ def insert_if_into_single_function_body(source_bytes, func_node, record, class_b
 
     # 随机选一个假方法模板
     fake_method_code = generate_method(has_return=False)
-    print("=== fake_method_code ===")
-    print(fake_method_code)
+    # print("=== fake_method_code ===")
+    # print(fake_method_code)
 
     SWIFT_LANGUAGE = Language(tsp_swift.language())
     parser = Parser(language=SWIFT_LANGUAGE)
 
     call_method_tree = parser.parse(fake_method_code.encode('utf-8'))
     call_method_root_node = call_method_tree.root_node
-    print("=== Parsed tree root node ===")
-    print(f"root_node type: {call_method_root_node.type}, children count: {len(call_method_root_node.children)}")
+    # print("=== Parsed tree root node ===")
+    # print(f"root_node type: {call_method_root_node.type}, children count: {len(call_method_root_node.children)}")
 
     need_call_func_name = None
     for child in call_method_root_node.children:
-        print(f"child type: {child.type}")
+        # print(f"child type: {child.type}")
         if child.type == "function_declaration":
             need_call_func_name = extract_function_name(child, fake_method_code.encode('utf-8'))
-            print(f"Extracted function name: {need_call_func_name}")
+            # print(f"Extracted function name: {need_call_func_name}")
 
     # 调用假方法
     fake_call = ""
@@ -575,7 +618,7 @@ def insert_if_into_single_function_body(source_bytes, func_node, record, class_b
     else:
         fake_call = ""
 
-    print(f"Fake call string: {fake_call}")
+    # print(f"Fake call string: {fake_call}")
 
     if is_static_or_class_method(func_node):
         # 类方法，不用 self 访问成员变量
@@ -639,7 +682,7 @@ def insert_if_into_single_function_body(source_bytes, func_node, record, class_b
     new_bytes = bytearray(source_bytes)
     new_bytes[insert_pos:insert_pos] = insert_logic.encode('utf-8')
 
-    print(f"✅ 已在 {new_name} 中插入 if 逻辑: {condition}")
+    # print(f"✅ 已在 {new_name} 中插入 if 逻辑: {condition}")
     return bytes(new_bytes)
 
 def insert_if_to_copied_functions(tree, source_bytes, function_map, parser, class_bool_map):
@@ -661,19 +704,19 @@ def insert_if_to_copied_functions(tree, source_bytes, function_map, parser, clas
         for func_node in func_nodes:
             info = extract_function_info(func_node, source_bytes)
             signature = info.get("signature")
-            print(f"\n🔓 准备处理方法并 if: {signature}")
+            # print(f"\n🔓 准备处理方法并 if: {signature}")
             if signature in signature_map and signature not in modified_signatures:
-                print(f"\n🔍 尝试在复制函数中插入 if: {signature}")
+                # print(f"\n🔍 尝试在复制函数中插入 if: {signature}")
                 record = signature_map[signature]
                 source_bytes = insert_if_into_single_function_body(source_bytes, func_node, record, class_bool_map)
                 modified_signatures.add(signature)
                 modified_this_round += 1
 
         if modified_this_round == 0:
-            print("⚠️ 本轮未找到可插入 if 的函数，可能已全部完成或有剩余未匹配函数。")
+            # print("⚠️ 本轮未找到可插入 if 的函数，可能已全部完成或有剩余未匹配函数。")
             break
 
-    print("\n🎉 所有复制函数插入 if 完成。")
+    # print("\n🎉 所有复制函数插入 if 完成。")
     return source_bytes
 
 
