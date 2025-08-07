@@ -20,14 +20,15 @@ This guide helps you set up a Python environment and use tree_sitter_swift to pa
 
 ---
 
+Done!
+
+Now your environment is ready to parse and modify Swift code using Tree-sitter.
+
 ## Run the script
 
 Once installed, run your Python script:
 
-    python modify.py
+    python3 modify.py batch_modify.py code_folder
 
 ---
 
-Done!
-
-Now your environment is ready to parse and modify Swift code using Tree-sitter.

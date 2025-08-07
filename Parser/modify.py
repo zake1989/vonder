@@ -13,7 +13,7 @@ import string
 # 载入配置，变量名池
 # =====================
 
-DEBUG = True  # 控制打印输出开关
+DEBUG = False  # 控制打印输出开关
 
 with open("config.json", "r", encoding="utf-8") as f:
     config = json.load(f)
@@ -21,7 +21,7 @@ with open("config.json", "r", encoding="utf-8") as f:
 variable_names_pool = config.get("bool_names", [])
 
 def random_suffix():
-    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=random.randint(3, 6)))
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=random.randint(8, 12)))
 
 def generate_variable_name():
     return random.choice(variable_names_pool) + random_suffix().capitalize()
@@ -302,7 +302,10 @@ def generate_copied_functions(tree, source_code_bytes):
         if original_name is None:
             continue
 
-        new_name = original_name + random_suffix().capitalize()
+        fr = random_suffix().capitalize()
+        sr = random_suffix().capitalize()
+
+        new_name = "d3e" + fr + sr
         bool_param = generate_variable_name()
 
         # 找参数括号节点
@@ -735,14 +738,14 @@ def process_swift_file(source_path):
     tree = parser.parse(new_source)
     new_source = insert_if_to_copied_functions(tree, new_source, function_map, parser, class_bool_map)
 
-    # 6. 打印结果
-    print("\n===== 最终修改后的文件内容 =====\n")
-    print(new_source.decode('utf-8'))
+    # # 6. 打印结果
+    # print("\n===== 最终修改后的文件内容 =====\n")
+    # print(new_source.decode('utf-8'))
 
-    # # 7. 想保存就解开：
-    # with open(source_path, "wb") as f:
-    #     f.write(new_source)
-    # print(f"✅ 文件已保存：{source_path}")
+    # 7. 想保存就解开：
+    with open(source_path, "wb") as f:
+        f.write(new_source)
+    print(f"✅ 文件已保存：{source_path}")
 
 # =====================
 # 脚本入口
